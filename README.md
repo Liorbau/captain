@@ -28,6 +28,12 @@ curl -fsSL https://raw.githubusercontent.com/Liorbau/captain/main/bootstrap.sh |
 This installs `cptn` to `~/.local/bin` and makes sure it's on your `PATH`.
 Open a new terminal (or `source` your shell profile) and you're set.
 
+Don't want the installer touching your shell config? Skip the `PATH` edit:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Liorbau/captain/main/bootstrap.sh | bash -s -- --no-modify-path
+```
+
 > Prefer to read before you run? Inspect the script first:
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/Liorbau/captain/main/bootstrap.sh -o bootstrap.sh
@@ -46,13 +52,17 @@ cptn update    # pull the latest policy (safe to re-run)
 cptn help      # all commands
 ```
 
-`cptn init` is safe to run in a repo that already has its own `AGENTS.md` or
-`CLAUDE.md`: it never overwrites them. The canonical policy lives in its own
-file (`ai-engineering-policy.md`). When `AGENTS.md` / `CLAUDE.md` don't exist,
-`cptn` creates them with the full policy inlined (so it works even if your
-agent tool doesn't resolve `@imports`). When they already exist, `cptn` only
-appends a one-line `@import` reference, preserving your content. A pre-existing
-`.cursor/rules/` rule is left untouched. Nothing is ever deleted.
+Captain writes the policy into just two files — `AGENTS.md` (read by Cursor and
+other agents) and `CLAUDE.md` (read by Claude Code) — inside a managed block
+delimited by HTML comments. It's safe to run in a repo that already has its own
+`AGENTS.md` or `CLAUDE.md`:
+
+- If the file doesn't exist, `cptn` creates it as just the managed block.
+- If it exists, `cptn` appends the block, preserving everything you wrote.
+- On `cptn update`, only the content **inside** the managed block is refreshed;
+  the rest of your file is never touched.
+
+Nothing else is installed and nothing is ever deleted.
 
 ## Windows
 
@@ -71,10 +81,13 @@ Captain installs via `curl | bash`, the same model as Homebrew, `rustup`, and
 To keep that trust well-placed:
 
 - All downloads use **HTTPS** (GitHub enforces TLS).
-- **Pin to a release** for reproducible installs instead of tracking `main`:
+- **Pin to a published release tag** for reproducible installs instead of
+  tracking `main` (use any tag from the repo's
+  [Releases](https://github.com/Liorbau/captain/releases) page):
   ```bash
-  CAPTAIN_REF=v1.0.0 cptn update
+  CAPTAIN_REF=v0.1.0 cptn update
   ```
+  Until a release is tagged, `cptn` tracks `main`.
 - The scripts are small — **read them before running** (see the inspect-first
   snippet above).
 

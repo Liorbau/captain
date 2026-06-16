@@ -7,19 +7,71 @@
 
 set -euo pipefail
 
-CAPTAIN_VERSION="1.0.0"
+CAPTAIN_VERSION="0.1.0"
 
-# Pin to a release tag/commit for reproducible installs, e.g.
-#   CAPTAIN_REF=v1.0.0 cptn update
+# Pin to a published release tag/commit for reproducible installs, e.g.
+#   CAPTAIN_REF=v0.1.0 cptn update   (defaults to main until a tag is published)
 CAPTAIN_REF="${CAPTAIN_REF:-main}"
 BASE_URL="https://raw.githubusercontent.com/Liorbau/captain/${CAPTAIN_REF}"
 
-POLICY_FILE="ai-engineering-policy.md"
-IMPORT_LINE="@${POLICY_FILE}"
-RULE_FILE=".cursor/rules/engineering-ownership.mdc"
-MARKER="AI Engineering Policy (managed by cptn)"
+# The policy is written into AGENTS.md and CLAUDE.md inside a managed block,
+# delimited by HTML comments (invisible in rendered Markdown). Only the content
+# between these markers is ever touched; the rest of the file is left alone.
+BEGIN_MARK="<!-- captain:begin AI engineering policy (managed - do not edit inside) -->"
+END_MARK="<!-- captain:end -->"
+TARGETS="AGENTS.md CLAUDE.md"
 
-err() { printf 'cptn: %s\n' "$1" >&2; }
+# --- presentation -----------------------------------------------------------
+# Colors only when stdout is a real terminal, NO_COLOR is unset, and TERM is
+# capable. Everything degrades to plain text in pipes, CI, and dumb terminals.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-dumb}" != "dumb" ]; then
+  C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'; C_DIM=$'\033[2m'
+  C_GREEN=$'\033[32m'; C_CYAN=$'\033[36m'; C_YELLOW=$'\033[33m'
+  IS_TTY=1
+else
+  C_RESET=''; C_BOLD=''; C_DIM=''
+  C_GREEN=''; C_CYAN=''; C_YELLOW=''
+  IS_TTY=0
+fi
+
+err()  { printf '%scptn:%s %s\n' "$C_YELLOW" "$C_RESET" "$1" >&2; }
+ok()   { printf '  %s✓%s %s\n' "$C_GREEN" "$C_RESET" "$1"; }
+info() { printf '  %s•%s %s\n' "$C_CYAN" "$C_RESET" "$1"; }
+
+banner() {
+  printf '\n%s%s⚓ Captain%s  %syou'\''re the captain, the AI is the crew.%s\n\n' \
+    "$C_BOLD" "$C_CYAN" "$C_RESET" "$C_DIM" "$C_RESET"
+}
+
+# Animated spinner while a background pid runs (no-op off a TTY).
+spinner() { # $1 = pid, $2 = label
+  pid="$1"; label="$2"
+  if [ "$IS_TTY" -ne 1 ]; then
+    wait "$pid" || return 1
+    return 0
+  fi
+  frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+  n=${#frames[@]}
+  i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    printf '\r  %s%s%s %s' "$C_CYAN" "${frames[i % n]}" "$C_RESET" "$label"
+    i=$((i + 1))
+    sleep 0.08
+  done
+  printf '\r\033[K'
+  wait "$pid" || return 1
+  return 0
+}
+
+download() { # $1 = url, $2 = dest, $3 = what
+  curl -fsSL "$1" -o "$2" &
+  if spinner "$!" "Fetching $3…"; then
+    return 0
+  else
+    err "failed to download $3"
+    exit 1
+  fi
+}
 
 require() {
   command -v "$1" >/dev/null 2>&1 || { err "missing required command: $1"; exit 1; }
@@ -27,31 +79,43 @@ require() {
 
 git_root() { git rev-parse --show-toplevel 2>/dev/null; }
 
-# Attach the policy to an agent entrypoint, idempotently and non-destructively.
-#  - already managed -> leave untouched
-#  - file absent      -> vendor the full policy inline (works even if the agent
-#                        tool does not resolve @imports)
-#  - file exists      -> append a minimal @import reference, preserving content
-add_policy() {
-  target="$1"
-  if [ -f "$target" ] && grep -qF "$MARKER" "$target"; then
-    echo "  - $target already managed by cptn, left untouched"
-  elif [ ! -f "$target" ]; then
-    {
-      printf '# %s\n' "$MARKER"
-      printf '# Source of truth: %s (run "cptn update" to refresh)\n\n' "$POLICY_FILE"
-      cat "$POLICY_FILE"
-    } > "$target"
-    echo "  - created $target (vendored full policy)"
+write_block() { # $1 = policy file -> emits the managed block on stdout
+  printf '%s\n' "$BEGIN_MARK"
+  cat "$1"
+  printf '%s\n' "$END_MARK"
+}
+
+# Write the policy into a target file, idempotently and non-destructively:
+#  - file absent          -> create it as just the managed block
+#  - block already present -> refresh the block content in place, leaving the
+#                             rest of the file untouched
+#  - file exists, no block -> append the block, preserving existing content
+apply_policy() { # $1 = target, $2 = policy file
+  target="$1"; policy="$2"
+  if [ ! -f "$target" ]; then
+    write_block "$policy" > "$target"
+    ok "$target created"
+  elif grep -qF "$BEGIN_MARK" "$target"; then
+    tmp="$(mktemp)"
+    awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
+      FNR==NR { pol[++n]=$0; next }
+      $0==b   { print; for (i=1;i<=n;i++) print pol[i]; skip=1; next }
+      $0==e   { skip=0; print; next }
+      skip    { next }
+                { print }
+    ' "$policy" "$target" > "$tmp"
+    mv "$tmp" "$target"
+    ok "$target policy refreshed"
   else
-    printf '\n# %s\n%s\n' "$MARKER" "$IMPORT_LINE" >> "$target"
-    echo "  - added policy import to existing $target"
+    { printf '\n'; write_block "$policy"; } >> "$target"
+    ok "$target kept; policy block appended"
   fi
 }
 
 cmd_init() {
   require curl
   require git
+  require awk
   root="$(git_root)" || true
   if [ -z "${root:-}" ]; then
     err "not inside a git repository (run 'cptn init' from your project)"
@@ -59,24 +123,19 @@ cmd_init() {
   fi
   cd "$root"
 
-  echo "Installing AI engineering policy into: $root"
+  banner
+  printf '  %s•%s repo: %s%s%s\n\n' "$C_CYAN" "$C_RESET" "$C_DIM" "$root" "$C_RESET"
 
-  # Canonical policy lives in its own namespaced file (always safe to refresh).
-  curl -fsSL "$BASE_URL/AGENTS.md" -o "$POLICY_FILE"
+  policy="$(mktemp)"
+  download "$BASE_URL/AGENTS.md" "$policy" "policy"
+  ok "policy downloaded"
+  for t in $TARGETS; do
+    apply_policy "$t" "$policy"
+  done
+  rm -f "$policy"
 
-  add_policy "AGENTS.md"
-  add_policy "CLAUDE.md"
-
-  mkdir -p .cursor/rules
-  if [ -f "$RULE_FILE" ]; then
-    echo "  - $RULE_FILE already exists, skipped"
-  else
-    curl -fsSL "$BASE_URL/cursor/rules/engineering-ownership.mdc" -o "$RULE_FILE"
-    echo "  - installed $RULE_FILE"
-  fi
-
-  echo ""
-  echo "Aye aye. Policy installed. You're the captain."
+  printf '\n%s%sAye aye, captain.%s %s\n' \
+    "$C_BOLD" "$C_GREEN" "$C_RESET" "${C_DIM}You're at the helm.${C_RESET}"
 }
 
 cmd_status() {
@@ -86,21 +145,28 @@ cmd_status() {
     exit 1
   fi
   cd "$root"
-  echo "Repo: $root"
-  [ -f "$POLICY_FILE" ] && echo "  [x] $POLICY_FILE" || echo "  [ ] $POLICY_FILE (missing)"
-  for f in AGENTS.md CLAUDE.md; do
-    if [ -f "$f" ] && grep -qF "$MARKER" "$f"; then
-      echo "  [x] $f carries the policy"
+
+  mark() { # $1 = ok(0)/missing(1), $2 = label
+    if [ "$1" -eq 0 ]; then
+      printf '  %s✓%s %s\n' "$C_GREEN" "$C_RESET" "$2"
     else
-      echo "  [ ] $f does not carry the policy"
+      printf '  %s✗%s %s%s%s\n' "$C_YELLOW" "$C_RESET" "$C_DIM" "$2" "$C_RESET"
+    fi
+  }
+
+  printf '%sRepo:%s %s\n' "$C_BOLD" "$C_RESET" "$root"
+  for f in $TARGETS; do
+    if [ -f "$f" ] && grep -qF "$BEGIN_MARK" "$f"; then
+      mark 0 "$f carries the policy"
+    else
+      mark 1 "$f does not carry the policy"
     fi
   done
-  [ -f "$RULE_FILE" ] && echo "  [x] $RULE_FILE" || echo "  [ ] $RULE_FILE (missing)"
 }
 
 cmd_help() {
   cat <<EOF
-cptn $CAPTAIN_VERSION - you're the captain, the AI is the crew.
+${C_BOLD}cptn $CAPTAIN_VERSION${C_RESET} - you're the captain, the AI is the crew.
 
 Usage:
   cptn init      Install/refresh the AI engineering policy in this repo
@@ -109,10 +175,14 @@ Usage:
   cptn version   Print the version
   cptn help      Show this help
 
+Captain writes the policy into AGENTS.md and CLAUDE.md inside a managed block.
+Your own content in those files is always preserved.
+
 Environment:
   CAPTAIN_REF    Git ref to install from (default: main).
-                 Pin to a release for reproducible installs, e.g.
-                 CAPTAIN_REF=v1.0.0 cptn update
+                 Pin to a published release tag for reproducible installs, e.g.
+                 CAPTAIN_REF=v0.1.0 cptn update
+  NO_COLOR       Set to disable colored output.
 EOF
 }
 

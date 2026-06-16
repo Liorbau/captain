@@ -5,9 +5,7 @@
 
 setup() {
   SRC="$(mktemp -d)"
-  printf '# Full Policy\nrule one\nrule two\n' > "$SRC/AGENTS.md"
-  mkdir -p "$SRC/cursor/rules"
-  printf 'RULE CONTENT\n' > "$SRC/cursor/rules/engineering-ownership.mdc"
+  printf '# Engineering Policy\nrule one\nrule two\n' > "$SRC/AGENTS.md"
 
   WORK="$(mktemp -d)"
   sed "s#https://raw.githubusercontent.com/Liorbau/captain/\${CAPTAIN_REF}#file://$SRC#" \
@@ -24,39 +22,63 @@ teardown() {
   rm -rf "$SRC" "$WORK" "$REPO"
 }
 
-@test "init vendors the full policy into a fresh AGENTS.md and CLAUDE.md" {
+@test "init writes the policy block into AGENTS.md and CLAUDE.md only" {
   run "$CPTN" init
   [ "$status" -eq 0 ]
-  grep -qF "AI Engineering Policy (managed by cptn)" AGENTS.md
-  grep -qF "Full Policy" AGENTS.md
-  grep -qF "Full Policy" CLAUDE.md
-  [ -f ai-engineering-policy.md ]
-  [ -f .cursor/rules/engineering-ownership.mdc ]
+  grep -qF "captain:begin" AGENTS.md
+  grep -qF "rule one" AGENTS.md
+  grep -qF "captain:begin" CLAUDE.md
+  grep -qF "rule one" CLAUDE.md
+  # nothing else should be created
+  [ ! -f ai-engineering-policy.md ]
+  [ ! -d .cursor ]
 }
 
-@test "init is idempotent (no duplicate managed blocks)" {
+@test "init is idempotent (single block, byte-stable on re-run)" {
   "$CPTN" init
-  run "$CPTN" init
-  [ "$status" -eq 0 ]
-  run grep -cF "managed by cptn" AGENTS.md
+  run grep -cF "captain:begin" AGENTS.md
   [ "$output" -eq 1 ]
+  before="$(cksum < AGENTS.md)"
+  "$CPTN" update
+  after="$(cksum < AGENTS.md)"
+  [ "$before" = "$after" ]
 }
 
-@test "an existing AGENTS.md is preserved and gets an @import appended" {
+@test "an existing AGENTS.md is preserved and gets the block appended" {
   printf '# my own rules\nkeep me\n' > AGENTS.md
   run "$CPTN" init
   [ "$status" -eq 0 ]
   grep -qF "keep me" AGENTS.md
-  grep -qF "@ai-engineering-policy.md" AGENTS.md
+  grep -qF "rule one" AGENTS.md
 }
 
-@test "a pre-existing cursor rule is never overwritten" {
-  mkdir -p .cursor/rules
-  printf 'MY CUSTOM RULE\n' > .cursor/rules/engineering-ownership.mdc
+@test "an existing CLAUDE.md is never erased; content preserved, block appended" {
+  printf '# My CLAUDE\nline one\nline two\n@AGENTS.md\n' > CLAUDE.md
+  before="$(wc -l < CLAUDE.md)"
   run "$CPTN" init
   [ "$status" -eq 0 ]
-  run cat .cursor/rules/engineering-ownership.mdc
-  [ "$output" = "MY CUSTOM RULE" ]
+  grep -qF "line one" CLAUDE.md
+  grep -qF "line two" CLAUDE.md
+  grep -qF "@AGENTS.md" CLAUDE.md
+  grep -qF "rule one" CLAUDE.md
+  after="$(wc -l < CLAUDE.md)"
+  [ "$after" -gt "$before" ]
+}
+
+@test "update refreshes the block in place, preserving user content" {
+  printf '# my own rules\nkeep me\n' > AGENTS.md
+  "$CPTN" init
+  grep -qF "keep me" AGENTS.md
+  grep -qF "rule one" AGENTS.md
+  # change the upstream policy, then update
+  printf '# Engineering Policy v2\nNEW RULE\n' > "$SRC/AGENTS.md"
+  "$CPTN" update
+  grep -qF "keep me" AGENTS.md      # user content preserved
+  grep -qF "NEW RULE" AGENTS.md     # new policy present
+  run grep -cF "captain:begin" AGENTS.md
+  [ "$output" -eq 1 ]               # still exactly one block
+  run grep -qF "rule one" AGENTS.md
+  [ "$status" -ne 0 ]               # old policy text removed
 }
 
 @test "status reports the installed state" {
