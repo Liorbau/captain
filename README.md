@@ -85,7 +85,7 @@ To keep that trust well-placed:
   tracking `main` (use any tag from the repo's
   [Releases](https://github.com/Liorbau/captain/releases) page):
   ```bash
-  CAPTAIN_REF=v0.1.0 cptn update
+  CAPTAIN_REF=v0.1.1 cptn update
   ```
   Until a release is tagged, `cptn` tracks `main`.
 - The scripts are small — **read them before running** (see the inspect-first
