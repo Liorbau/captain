@@ -8,7 +8,7 @@ Before writing code:
 - Restate the task in your own words.
 - Identify affected files, modules, APIs, data models, or workflows.
 - Identify meaningful design decisions.
-- Present 2-4 options for important architecture or product decisions. (use 'AskQuestion' multi choice tool)
+- Present 2-4 options for important architecture or product decisions. (use the multiple-choice question tool, e.g. AskUserQuestion in Claude Code)
 - Recommend one option, but wait for human approval before implementing high-impact decisions.
 - Do not begin large implementation without an approved plan.
 

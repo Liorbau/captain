@@ -4,10 +4,26 @@
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/Liorbau/captain/main/bootstrap.sh | bash
+#   ... | bash -s -- --no-modify-path   # install without editing your shell rc
 #
 # Supported: macOS and Linux. Windows users: run this inside WSL or Git Bash.
 
 set -euo pipefail
+
+MODIFY_PATH=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-modify-path) MODIFY_PATH=0 ;;
+    -h|--help)
+      echo "Usage: bootstrap.sh [--no-modify-path]"
+      exit 0
+      ;;
+    *)
+      echo "bootstrap: unknown option: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
 
 CAPTAIN_REF="${CAPTAIN_REF:-main}"
 BASE_URL="https://raw.githubusercontent.com/Liorbau/captain/${CAPTAIN_REF}"
@@ -42,7 +58,12 @@ case ":$PATH:" in
       */zsh)  rc="$HOME/.zshrc" ;;
       */bash) rc="$HOME/.bashrc" ;;
     esac
-    if [ -n "$rc" ]; then
+    if [ "$MODIFY_PATH" -eq 0 ]; then
+      echo ""
+      echo "$INSTALL_DIR is not on your PATH (left your shell config untouched)."
+      echo "Add this line to your shell profile to use cptn:"
+      echo "  $line"
+    elif [ -n "$rc" ]; then
       if ! grep -qsF "$INSTALL_DIR" "$rc"; then
         printf '\n# Added by captain bootstrap\n%s\n' "$line" >> "$rc"
       fi
