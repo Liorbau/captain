@@ -1,5 +1,7 @@
 # Captain
 
+[![CI](https://github.com/Liorbau/captain/actions/workflows/ci.yml/badge.svg)](https://github.com/Liorbau/captain/actions/workflows/ci.yml)
+
 **You're the captain. The AI is the crew.**
 
 Captain is a small command-line tool (`cptn`) that drops a shared AI engineering
