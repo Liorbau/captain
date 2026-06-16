@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+#
+# cptn (Captain) - you're the captain, the AI is the crew.
+# Installs and manages the AI engineering policy in a repo.
+#
+# Portable on Bash 3.2+ and BSD/GNU coreutils (macOS + Linux).
+
+set -euo pipefail
+
+CAPTAIN_VERSION="1.0.0"
+
+# Pin to a release tag/commit for reproducible installs, e.g.
+#   CAPTAIN_REF=v1.0.0 cptn update
+CAPTAIN_REF="${CAPTAIN_REF:-main}"
+BASE_URL="https://raw.githubusercontent.com/Liorbau/captain/${CAPTAIN_REF}"
+
+POLICY_FILE="ai-engineering-policy.md"
+IMPORT_LINE="@${POLICY_FILE}"
+RULE_FILE=".cursor/rules/engineering-ownership.mdc"
+MARKER="AI Engineering Policy (managed by cptn)"
+
+err() { printf 'cptn: %s\n' "$1" >&2; }
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || { err "missing required command: $1"; exit 1; }
+}
+
+git_root() { git rev-parse --show-toplevel 2>/dev/null; }
+
+# Attach the policy to an agent entrypoint, idempotently and non-destructively.
+#  - already managed -> leave untouched
+#  - file absent      -> vendor the full policy inline (works even if the agent
+#                        tool does not resolve @imports)
+#  - file exists      -> append a minimal @import reference, preserving content
+add_policy() {
+  target="$1"
+  if [ -f "$target" ] && grep -qF "$MARKER" "$target"; then
+    echo "  - $target already managed by cptn, left untouched"
+  elif [ ! -f "$target" ]; then
+    {
+      printf '# %s\n' "$MARKER"
+      printf '# Source of truth: %s (run "cptn update" to refresh)\n\n' "$POLICY_FILE"
+      cat "$POLICY_FILE"
+    } > "$target"
+    echo "  - created $target (vendored full policy)"
+  else
+    printf '\n# %s\n%s\n' "$MARKER" "$IMPORT_LINE" >> "$target"
+    echo "  - added policy import to existing $target"
+  fi
+}
+
+cmd_init() {
+  require curl
+  require git
+  root="$(git_root)" || true
+  if [ -z "${root:-}" ]; then
+    err "not inside a git repository (run 'cptn init' from your project)"
+    exit 1
+  fi
+  cd "$root"
+
+  echo "Installing AI engineering policy into: $root"
+
+  # Canonical policy lives in its own namespaced file (always safe to refresh).
+  curl -fsSL "$BASE_URL/AGENTS.md" -o "$POLICY_FILE"
+
+  add_policy "AGENTS.md"
+  add_policy "CLAUDE.md"
+
+  mkdir -p .cursor/rules
+  if [ -f "$RULE_FILE" ]; then
+    echo "  - $RULE_FILE already exists, skipped"
+  else
+    curl -fsSL "$BASE_URL/cursor/rules/engineering-ownership.mdc" -o "$RULE_FILE"
+    echo "  - installed $RULE_FILE"
+  fi
+
+  echo ""
+  echo "Aye aye. Policy installed. You're the captain."
+}
+
+cmd_status() {
+  root="$(git_root)" || true
+  if [ -z "${root:-}" ]; then
+    err "not inside a git repository"
+    exit 1
+  fi
+  cd "$root"
+  echo "Repo: $root"
+  [ -f "$POLICY_FILE" ] && echo "  [x] $POLICY_FILE" || echo "  [ ] $POLICY_FILE (missing)"
+  for f in AGENTS.md CLAUDE.md; do
+    if [ -f "$f" ] && grep -qF "$MARKER" "$f"; then
+      echo "  [x] $f carries the policy"
+    else
+      echo "  [ ] $f does not carry the policy"
+    fi
+  done
+  [ -f "$RULE_FILE" ] && echo "  [x] $RULE_FILE" || echo "  [ ] $RULE_FILE (missing)"
+}
+
+cmd_help() {
+  cat <<EOF
+cptn $CAPTAIN_VERSION - you're the captain, the AI is the crew.
+
+Usage:
+  cptn init      Install/refresh the AI engineering policy in this repo
+  cptn update    Pull the latest policy (alias for init; safe to re-run)
+  cptn status    Show whether the policy is installed in this repo
+  cptn version   Print the version
+  cptn help      Show this help
+
+Environment:
+  CAPTAIN_REF    Git ref to install from (default: main).
+                 Pin to a release for reproducible installs, e.g.
+                 CAPTAIN_REF=v1.0.0 cptn update
+EOF
+}
+
+main() {
+  case "${1:-help}" in
+    init)             shift; cmd_init "$@" ;;
+    update)           shift; cmd_init "$@" ;;
+    status)           shift; cmd_status "$@" ;;
+    version|--version|-v) echo "cptn $CAPTAIN_VERSION" ;;
+    help|--help|-h|"") cmd_help ;;
+    *) err "unknown command: $1"; echo ""; cmd_help; exit 1 ;;
+  esac
+}
+
+main "$@"

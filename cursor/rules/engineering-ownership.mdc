@@ -1,0 +1,16 @@
+---
+description: Engineering ownership protocol for AI-assisted coding
+alwaysApply: true
+---
+
+Follow the repo-level policy in `AGENTS.md`.
+
+Core behavior:
+- Do not start large implementation without an approved plan.
+- Surface meaningful design choices before coding.
+- Ask the developer to choose between important architecture options using 'AskQuestion' tool (multi choice).
+- Prefer small, reviewable diffs.
+- Pause before changing more than 3 files or ~150 lines.
+- Add or update tests when behavior changes.
+- Explain assumptions, risks, failure modes, and verification steps.
+- After implementation, summarize changed files and how to verify behavior.
