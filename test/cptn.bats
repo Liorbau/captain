@@ -5,7 +5,9 @@
 
 setup() {
   SRC="$(mktemp -d)"
-  printf '# Engineering Policy\nrule one\nrule two\n' > "$SRC/AGENTS.md"
+  # Note: deliberately NO trailing newline, mirroring a real policy file, so the
+  # end-marker placement is exercised.
+  printf '# Engineering Policy\nrule one\nrule two' > "$SRC/AGENTS.md"
 
   WORK="$(mktemp -d)"
   sed "s#https://raw.githubusercontent.com/Liorbau/captain/\${CAPTAIN_REF}#file://$SRC#" \
@@ -32,6 +34,14 @@ teardown() {
   # nothing else should be created
   [ ! -f ai-engineering-policy.md ]
   [ ! -d .cursor ]
+}
+
+@test "end marker is on its own line even when policy has no trailing newline" {
+  "$CPTN" init
+  run grep -x -- "<!-- captain:end -->" AGENTS.md
+  [ "$status" -eq 0 ]
+  run grep -x -- "<!-- captain:end -->" CLAUDE.md
+  [ "$status" -eq 0 ]
 }
 
 @test "init is idempotent (single block, byte-stable on re-run)" {

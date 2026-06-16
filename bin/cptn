@@ -7,10 +7,10 @@
 
 set -euo pipefail
 
-CAPTAIN_VERSION="0.1.0"
+CAPTAIN_VERSION="0.1.1"
 
 # Pin to a published release tag/commit for reproducible installs, e.g.
-#   CAPTAIN_REF=v0.1.0 cptn update   (defaults to main until a tag is published)
+#   CAPTAIN_REF=v0.1.1 cptn update   (defaults to main until a tag is published)
 CAPTAIN_REF="${CAPTAIN_REF:-main}"
 BASE_URL="https://raw.githubusercontent.com/Liorbau/captain/${CAPTAIN_REF}"
 
@@ -82,6 +82,9 @@ git_root() { git rev-parse --show-toplevel 2>/dev/null; }
 write_block() { # $1 = policy file -> emits the managed block on stdout
   printf '%s\n' "$BEGIN_MARK"
   cat "$1"
+  # Guarantee the end marker lands on its own line even if the policy file has
+  # no trailing newline (otherwise update can't find the end marker reliably).
+  [ -n "$(tail -c 1 "$1")" ] && printf '\n'
   printf '%s\n' "$END_MARK"
 }
 
@@ -181,7 +184,7 @@ Your own content in those files is always preserved.
 Environment:
   CAPTAIN_REF    Git ref to install from (default: main).
                  Pin to a published release tag for reproducible installs, e.g.
-                 CAPTAIN_REF=v0.1.0 cptn update
+                 CAPTAIN_REF=v0.1.1 cptn update
   NO_COLOR       Set to disable colored output.
 EOF
 }
